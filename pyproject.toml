@@ -1,0 +1,79 @@
+[project]
+name = "fcx"
+version = "0.1.0"
+description = "Command-line repository explorer returning file:line citations, powered by FastContext"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.13"
+dependencies = [
+    "filelock>=3.29.4",
+    "httpx>=0.28.1",
+    "jinja2>=3.1.6",
+    "mlx-lm>=0.31.3",
+    "openai>=2.43.0",
+    "pydantic>=2.13.4",
+    "pydantic-settings>=2.14.1",
+    "python-dotenv>=1.2.2",
+    "typer>=0.26.7",
+]
+
+[project.scripts]
+fcx = "fcx.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fcx"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.0",
+    "pytest-asyncio>=1.4.0",
+    "pytest-mock>=3.15.1",
+    "ruff>=0.15.17",
+    "ty>=0.0.50",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/fcx/prompts/system.md.jinja" = "fcx/prompts/system.md.jinja"
+"src/fcx/prompts/query.md.jinja" = "fcx/prompts/query.md.jinja"
+"src/fcx/prompts/max_turns.md.jinja" = "fcx/prompts/max_turns.md.jinja"
+
+[tool.ty.environment]
+python-version = "3.13"
+
+[tool.ruff]
+line-length = 110
+target-version = "py313"
+
+[tool.basedpyright]
+# `ty` is the committed checker; this keeps an editor running basedpyright sane.
+# Stay on the strict baseline, but silence rules that fight things we can't (and
+# shouldn't) change: intentional `Any` in JSON payloads, the loosely-typed OpenAI
+# SDK, Typer's call-in-default-argument idiom, and bare expression statements.
+typeCheckingMode = "recommended"
+reportExplicitAny = false
+reportAny = false
+reportUnusedCallResult = false
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
+reportCallInDefaultInitializer = false
+
+# Tests lean on pytest's untyped fixtures (`tmp_path`, `mocker`) and patch lambdas
+# (which can't carry annotations) — keep strict checking on shipped code, relax the
+# fixture/lambda-typing rules here.
+[[tool.basedpyright.executionEnvironments]]
+root = "tests"
+reportMissingParameterType = false
+reportUnknownParameterType = false
+reportUnknownLambdaType = false
+reportUnusedParameter = false
+reportUnannotatedClassAttribute = false
