@@ -48,7 +48,7 @@ def _line_span(start: int, end: int) -> Text:
     return Text(str(start) if start == end else f"{start}-{end}", style="magenta")
 
 
-def _print_result(res: ExploreResult, root: Path, query: str) -> None:
+def _print_result(res: ExploreResult, root: Path) -> None:
     """Render the human-facing default view: one table of real-path citations, then a stats line.
 
     The model speaks in /workspace paths (its training prior); we only ever show the remapped, real
@@ -57,13 +57,10 @@ def _print_result(res: ExploreResult, root: Path, query: str) -> None:
     console = Console()
     if res.citations:
         table = Table(
-            title=Text(query, style="italic"),
-            title_justify="left",
             box=box.SIMPLE_HEAVY,
             padding=(0, 2),
             expand=True,
             header_style="bold",
-            row_styles=["", "on grey7"],
         )
         table.add_column("File", style="cyan", overflow="fold", ratio=3)
         table.add_column("Lines", justify="right", no_wrap=True)
@@ -80,7 +77,7 @@ def _print_result(res: ExploreResult, root: Path, query: str) -> None:
         console.print()
         console.print(table)
     else:
-        console.print(f"\n[dim]No citations found for[/dim] [italic]{query}[/italic]")
+        console.print("\n[dim]No citations found.[/dim]")
 
     stats = Text("  ", style="dim")
     stats.append(f"{res.turns} turns · {res.usage.total:,} tokens · {res.usage.cached:,} cached", style="dim")
@@ -137,7 +134,7 @@ async def _run_explore(
     elif citation:
         print(res.answer)
     else:
-        _print_result(res, root, query)
+        _print_result(res, root)
 
 
 @app.command()
