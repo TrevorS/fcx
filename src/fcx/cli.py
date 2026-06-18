@@ -7,18 +7,18 @@ stays resident across invocations; only this CLI process is ephemeral.
 
 import asyncio
 import json
-import sys
 from pathlib import Path
 
 import typer
 from rich import box
 from rich.console import Console
+from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 from rich.text import Text
 
-from .agent import explore_consistent, make_agent
+from .agent import Agent, explore_consistent, make_agent
 from .citations import ExploreResult
-from .config import get_config
+from .config import Config, get_config
 from .llm import LLM
 from .model_server import ensure_model_up, model_status, stop_model
 from .ripgrep import resolve_rg
@@ -34,7 +34,21 @@ def _rel(path: str, root: Path) -> str:
         return path
 
 
-def _print_result(res: ExploreResult, root: Path) -> None:
+def _clean_reason(reason: str | None) -> str:
+    """Strip the surrounding parentheses the model wraps reasons in."""
+    if not reason:
+        return ""
+    r = reason.strip()
+    if r.startswith("(") and r.endswith(")"):
+        r = r[1:-1].strip()
+    return r
+
+
+def _line_span(start: int, end: int) -> Text:
+    return Text(str(start) if start == end else f"{start}-{end}", style="magenta")
+
+
+def _print_result(res: ExploreResult, root: Path, query: str) -> None:
     """Render the human-facing default view: one table of real-path citations, then a stats line.
 
     The model speaks in /workspace paths (its training prior); we only ever show the remapped, real
@@ -42,25 +56,57 @@ def _print_result(res: ExploreResult, root: Path) -> None:
     """
     console = Console()
     if res.citations:
-        table = Table(box=box.SIMPLE_HEAD, expand=True, show_edge=False, pad_edge=False, header_style="bold")
-        table.add_column("Location", style="cyan", overflow="fold")
-        table.add_column("Why", overflow="fold")
+        table = Table(
+            title=Text(query, style="italic"),
+            title_justify="left",
+            box=box.SIMPLE_HEAVY,
+            padding=(0, 2),
+            expand=True,
+            header_style="bold",
+            row_styles=["", "on grey7"],
+        )
+        table.add_column("File", style="cyan", overflow="fold", ratio=3)
+        table.add_column("Lines", justify="right", no_wrap=True)
+        table.add_column("Why", overflow="fold", ratio=4)
         for c in res.citations:
-            loc = Text(f"{_rel(c.path, root)}:{c.start}-{c.end}")
+            span = _line_span(c.start, c.end)
             if not c.valid:
-                detail = f"{c.file_lines} lines" if c.file_lines is not None else "missing"
-                loc.append(f"  [invalid: {detail}]", style="red")
+                span.append("\ninvalid" if c.file_lines is None else f"\n>{c.file_lines}", style="red")
             if not c.in_root:
-                loc.append("  [outside workspace]", style="yellow")
+                span.append("\nexternal", style="yellow")
             if c.votes > 1:
-                loc.append(f"  [votes: {c.votes}]", style="green")
-            table.add_row(loc, c.reason or "")
+                span.append(f"\n×{c.votes}", style="green")
+            table.add_row(_rel(c.path, root), span, _clean_reason(c.reason))
+        console.print()
         console.print(table)
     else:
-        console.print(res.answer or "[dim]No citations found.[/dim]")
-    Console(stderr=True).print(
-        f"[dim]{res.turns} turns · {res.usage.total} tokens · {res.usage.cached} cached · {root}[/dim]"
+        console.print(f"\n[dim]No citations found for[/dim] [italic]{query}[/italic]")
+
+    stats = Text("  ", style="dim")
+    stats.append(f"{res.turns} turns · {res.usage.total:,} tokens · {res.usage.cached:,} cached", style="dim")
+    Console(stderr=True).print(stats)
+
+
+async def _explore_with_progress(
+    agent: Agent, cfg: Config, query: str, max_turns: int, samples: int
+) -> ExploreResult:
+    """Run an exploration under a transient spinner that narrates the live turn/tool activity."""
+    progress = Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=Console(stderr=True),
+        transient=True,
     )
+    with progress:
+        task = progress.add_task("starting model server", total=None)
+        if cfg.manage_model:
+            await ensure_model_up(cfg)
+        progress.update(task, description="exploring")
+
+        async def on_turn(n: int, summary: str) -> None:
+            progress.update(task, description=f"exploring  ·  turn {n}  ·  {summary}")
+
+        return await explore_consistent(agent, query, max_turns=max_turns, samples=samples, on_turn=on_turn)
 
 
 async def _run_explore(
@@ -75,30 +121,23 @@ async def _run_explore(
     cfg = get_config()
     resolve_rg(cfg.rg_path)  # fail loud if ripgrep is missing
     root = cfg.resolved_root(path)
-
-    if cfg.manage_model:
-        await ensure_model_up(cfg)
-
     agent = make_agent(cfg, LLM(cfg), root)
+    n_turns = max_turns or cfg.max_turns
+    n_samples = samples or cfg.samples
 
-    async def on_turn(n: int, summary: str) -> None:
-        if not quiet:
-            print(f"turn {n}: {summary}", file=sys.stderr)
-
-    res = await explore_consistent(
-        agent,
-        query,
-        max_turns=max_turns or cfg.max_turns,
-        samples=samples or cfg.samples,
-        on_turn=on_turn,
-    )
+    if quiet or json_out:  # machine-facing output: no live spinner
+        if cfg.manage_model:
+            await ensure_model_up(cfg)
+        res = await explore_consistent(agent, query, max_turns=n_turns, samples=n_samples)
+    else:
+        res = await _explore_with_progress(agent, cfg, query, n_turns, n_samples)
 
     if json_out:
         print(res.model_dump_json(indent=2))
     elif citation:
         print(res.answer)
     else:
-        _print_result(res, root)
+        _print_result(res, root, query)
 
 
 @app.command()
