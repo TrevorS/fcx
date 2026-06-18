@@ -5,6 +5,7 @@ import pytest
 
 from fcx.tools import GlobTool, GrepTool, ReadTool, build_toolset
 from fcx.tools.base import ToolCall, ToolError, ensure_within
+from fcx.tools.grep import MAX_BYTES
 from fcx.config import Config
 
 
@@ -69,6 +70,22 @@ async def test_grep_count_mode(repo: Path):
 async def test_grep_sandboxed(repo: Path):
     with pytest.raises(ToolError):
         await GrepTool().run({"pattern": "x", "path": "/etc"}, root=repo)
+
+
+async def test_grep_truncates_long_lines(tmp_path: Path):
+    # A single multi-100KB line (minified bundle) must not be dumped whole into the model's context.
+    (tmp_path / "bundle.js").write_text("var x = '" + "a" * 200_000 + "'; // port\n")
+    out = await GrepTool().run({"pattern": "port", "output_mode": "content"}, root=tmp_path)
+    assert len(out) < 10_000
+
+
+async def test_grep_caps_total_bytes(tmp_path: Path):
+    # Many medium-length matching lines (under the per-line cap) must still be bounded in total.
+    line = "port " + "a" * 1500
+    (tmp_path / "big.txt").write_text("\n".join(line for _ in range(60)) + "\n")
+    out = await GrepTool().run({"pattern": "port", "output_mode": "content"}, root=tmp_path)
+    assert "capped" in out
+    assert len(out.encode("utf-8")) <= MAX_BYTES + 100  # cap plus a short truncation note
 
 
 async def test_dispatch_runs_concurrently(repo: Path):

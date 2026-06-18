@@ -11,6 +11,8 @@ from ..ripgrep import resolve_rg, run_rg
 from .base import Tool, ToolError, ensure_within
 
 LIMIT = 100
+MAX_COLUMNS = 2000  # truncate very long matching lines (e.g. minified bundles) at the ripgrep level
+MAX_BYTES = 64_000  # hard cap on total tool output, so one grep can't blow the model's context
 
 _DESC = (
     "A powerful search tool built on ripgrep. Prefer this over shelling out to grep/rg. Supports full "
@@ -84,7 +86,9 @@ class GrepTool(Tool):
         elif mode == "count":
             cmd.append("--count-matches")
 
-        cmd += ["--heading", "--color", "never"]
+        # --max-columns truncates pathologically long lines (minified JS, lockfiles, generated code)
+        # at the source; without it a single multi-MB match can balloon the prompt to millions of tokens.
+        cmd += ["--heading", "--color", "never", "--max-columns", str(MAX_COLUMNS), "--max-columns-preview"]
         return cmd
 
     @override
@@ -103,6 +107,15 @@ class GrepTool(Tool):
             limit = int(head)
 
         lines = out.splitlines()
+        notes: list[str] = []
         if len(lines) > limit:
-            return "\n".join(lines[:limit]) + f"\nResults truncated to first {limit} lines."
-        return "\n".join(lines)
+            lines = lines[:limit]
+            notes.append(f"truncated to first {limit} lines")
+
+        text = "\n".join(lines)
+        encoded = text.encode("utf-8")
+        if len(encoded) > MAX_BYTES:
+            text = encoded[:MAX_BYTES].decode("utf-8", errors="ignore")
+            notes.append(f"output capped at {MAX_BYTES} bytes")
+
+        return text + (f"\nResults {', '.join(notes)}." if notes else "")
