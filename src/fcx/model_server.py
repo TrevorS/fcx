@@ -36,14 +36,33 @@ def server_port(cfg: Config) -> int:
     return _parsed(cfg).port or 80
 
 
+def _serves_model(body: Any, cfg: Config) -> bool:
+    """Does an OpenAI ``/models`` payload show our model is actually being served?
+
+    A bare 200 is not enough: an unrelated dev server or proxy squatting on the port (OrbStack, Vite,
+    …) happily returns HTML with a 200, which would look healthy and then 404 every real request. We
+    require a well-formed models list, and for a managed local server we require the configured model
+    to be the one loaded.
+    """
+    if not isinstance(body, dict):
+        return False
+    served = {m.get("id") for m in body.get("data", []) if isinstance(m, dict)}
+    if cfg.manage_model and is_local(cfg):
+        return cfg.model in served
+    return bool(served)
+
+
 async def _healthy(cfg: Config) -> bool:
     url = cfg.base_url.rstrip("/") + "/models"
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
             r = await client.get(url, headers={"Authorization": f"Bearer {cfg.api_key.get_secret_value()}"})
-        return r.status_code == 200
-    except httpx.HTTPError:
+        if r.status_code != 200:
+            return False
+        body = r.json()
+    except (httpx.HTTPError, ValueError):  # ValueError = JSON decode failure (e.g. an HTML page)
         return False
+    return _serves_model(body, cfg)
 
 
 def _port_in_use(port: int) -> bool:
@@ -108,7 +127,8 @@ async def ensure_model_up(cfg: Config) -> None:
         port = server_port(cfg)
         if _port_in_use(port):
             raise RuntimeError(
-                f"port {port} is in use but not serving {cfg.model}; refusing to start a second server."
+                f"port {port} is in use but not serving {cfg.model} (another process is bound to it); "
+                f"set FCX_BASE_URL to a free port and retry."
             )
         _spawn_detached(cfg)
         await _wait_healthy(cfg, cfg.startup_timeout)

@@ -30,7 +30,9 @@ class Config(BaseSettings):
     )
 
     # --- backend identity ---
-    base_url: str = "http://localhost:8080/v1"
+    # Port 8765 (not mlx_lm's default 8080) avoids the most common local dev/proxy collision; an
+    # unrelated server on 8080 that returns 200 would otherwise shadow the model (see _healthy).
+    base_url: str = "http://localhost:8765/v1"
     model: str = "usermma/FastContext-1.0-4B-RL-mlx-8Bit"
     api_key: SecretStr = SecretStr("EMPTY")
     manage_model: bool = True
