@@ -50,6 +50,10 @@ class Config(BaseSettings):
     max_turns: int = 8
     tool_timeout: int = 15
     rg_path: str | None = None
+    # If the model cites a missing file or out-of-bounds range, spend one extra turn asking it to fix.
+    repair_invalid_citations: bool = True
+    # Self-consistency: run N independent explorations and merge their citations by agreement.
+    samples: int = 1
 
     # --- local model lifecycle ---
     startup_timeout: int = 600

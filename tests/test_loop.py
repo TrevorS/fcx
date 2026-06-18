@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Any
 
-from fcx.agent import Agent
+from fcx.agent import Agent, explore_consistent
 from fcx.config import Config
 from fcx.llm import Step
 from fcx.tools import build_toolset
@@ -89,3 +89,59 @@ async def test_progress_callback_fires(tmp_path: Path):
 
     await _agent(tmp_path, llm).explore("q", max_turns=4, on_turn=on_turn)
     assert seen == [(1, "final answer")]
+
+
+def _agent_with_repair(repo: Path, llm, repair: bool) -> Agent:
+    cfg = Config()
+    return Agent(
+        llm=llm, toolset=build_toolset(cfg, repo), system_prompt="SYS", root=repo, repair=repair
+    )
+
+
+async def test_repairs_invalid_citation(tmp_path: Path):
+    (tmp_path / "a.py").write_text("1\n2\n3\n")
+    bad = Step(content="<final_answer>\n/workspace/a.py:1-99 (oops)\n</final_answer>", tool_calls=[], usage=None)
+    good = Step(content="<final_answer>\n/workspace/a.py:1-2 (fixed)\n</final_answer>", tool_calls=[], usage=None)
+    llm = MockLLM([bad, good])
+    res = await _agent_with_repair(tmp_path, llm, repair=True).explore("q", max_turns=4)
+    assert res.turns == 2  # one extra corrective turn
+    assert res.citations[0].valid is True
+    assert (res.citations[0].start, res.citations[0].end) == (1, 2)
+    # a repair user message must have been injected before the second call
+    assert any(
+        m.get("role") == "user" and "invalid" in m.get("content", "") for call in llm.calls for m in call
+    )
+
+
+async def test_repair_disabled_returns_invalid_as_is(tmp_path: Path):
+    (tmp_path / "a.py").write_text("1\n2\n3\n")
+    bad = Step(content="<final_answer>\n/workspace/a.py:1-99 (oops)\n</final_answer>", tool_calls=[], usage=None)
+    llm = MockLLM([bad])
+    res = await _agent_with_repair(tmp_path, llm, repair=False).explore("q", max_turns=4)
+    assert res.turns == 1
+    assert res.citations[0].valid is False
+
+
+async def test_repair_happens_at_most_once(tmp_path: Path):
+    (tmp_path / "a.py").write_text("1\n2\n3\n")
+    bad = Step(content="<final_answer>\n/workspace/a.py:1-99\n</final_answer>", tool_calls=[], usage=None)
+    # both attempts are invalid; repair must fire once then accept the second result
+    llm = MockLLM([bad, bad])
+    res = await _agent_with_repair(tmp_path, llm, repair=True).explore("q", max_turns=4)
+    assert res.turns == 2
+    assert res.citations[0].valid is False
+
+
+async def test_explore_consistent_merges_samples(tmp_path: Path):
+    (tmp_path / "a.py").write_text("1\n2\n3\n4\n5\n")
+
+    def final(rng: str):
+        return Step(content=f"<final_answer>\n/workspace/a.py:{rng}\n</final_answer>", tool_calls=[], usage=None)
+
+    # three independent samples that overlap on a.py
+    llm = MockLLM([final("1-2"), final("1-3"), final("2-3")])
+    agent = _agent_with_repair(tmp_path, llm, repair=False)
+    res = await explore_consistent(agent, "q", max_turns=4, samples=3)
+    assert len(res.citations) == 1
+    c = res.citations[0]
+    assert (c.start, c.end, c.votes) == (1, 3, 3)

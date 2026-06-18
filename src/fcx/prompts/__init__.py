@@ -42,3 +42,8 @@ def build_query_prompt(query: str) -> str:
 def build_max_turns_prompt() -> str:
     """The nudge appended on the final turn, asking the model to answer now."""
     return _env.get_template("max_turns.md.jinja").render()
+
+
+def build_repair_prompt(problems: list[str]) -> str:
+    """The corrective message listing invalid citations, asking the model to fix them once."""
+    return _env.get_template("repair.md.jinja").render(problems="\n".join(problems))

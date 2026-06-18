@@ -1,0 +1,141 @@
+# Eval cases for fcx, scored against the paper's file-F1 + line-F1 metric.
+#
+# Each case explores THIS repository (path defaults to the repo root) with a natural-language query
+# and lists the ground-truth file:line ranges that answer it. Line ranges are deliberately a little
+# generous — line-F1 rewards overlap, so a citation landing inside the range scores partial credit.
+#
+# Run with: make eval   (or: uv run python evals/run.py)
+
+[[case]]
+id = "turn-loop"
+query = "where is the multi-turn exploration loop that calls the model and dispatches tools implemented"
+expect = [{ file = "src/fcx/agent.py", start = 36, end = 95 }]
+
+[[case]]
+id = "request-build"
+query = "where is the OpenAI chat-completions request payload built and sent"
+expect = [{ file = "src/fcx/llm.py", start = 51, end = 83 }]
+
+[[case]]
+id = "virtual-path-remap"
+query = "where are virtual /workspace paths translated to and from the real filesystem"
+expect = [{ file = "src/fcx/paths.py", start = 13, end = 29 }]
+
+[[case]]
+id = "citation-parse"
+query = "where is the final_answer block parsed into structured citations"
+expect = [{ file = "src/fcx/citations.py", start = 87, end = 135 }]
+
+[[case]]
+id = "concurrent-dispatch"
+query = "where are a turn's tool calls executed concurrently"
+expect = [{ file = "src/fcx/tools/base.py", start = 105, end = 107 }]
+
+[[case]]
+id = "default-model"
+query = "where is the default local MLX model id configured"
+expect = [{ file = "src/fcx/config.py", start = 30, end = 45 }]
+
+[[case]]
+id = "explore-command"
+query = "where is the explore CLI command and its options defined"
+expect = [{ file = "src/fcx/cli.py", start = 71, end = 95 }]
+
+[[case]]
+id = "read-tool"
+query = "where is the Read tool that returns line-numbered file contents implemented"
+expect = [{ file = "src/fcx/tools/read.py", start = 25, end = 83 }]
+
+[[case]]
+id = "model-server-lifecycle"
+query = "where is the resident local model server started and kept a single shared instance"
+expect = [{ file = "src/fcx/model_server.py", start = 1, end = 144 }]
+
+[[case]]
+id = "ripgrep-resolve"
+query = "where is the ripgrep binary path resolved or validated"
+expect = [{ file = "src/fcx/ripgrep.py", start = 1, end = 39 }]
+
+# --- tools ---
+
+[[case]]
+id = "glob-tool"
+query = "where is the Glob tool that finds files by pattern implemented"
+expect = [{ file = "src/fcx/tools/glob.py", start = 19, end = 58 }]
+
+[[case]]
+id = "grep-tool"
+query = "where is the Grep tool implemented and how are its ripgrep arguments built"
+expect = [{ file = "src/fcx/tools/grep.py", start = 24, end = 108 }]
+
+[[case]]
+id = "sandbox-guard"
+query = "where is a path checked to be inside the workspace root before a tool touches it"
+expect = [{ file = "src/fcx/tools/base.py", start = 18, end = 27 }]
+
+[[case]]
+id = "toolset-build"
+query = "where is the toolset of Read, Glob, and Grep assembled"
+expect = [{ file = "src/fcx/tools/__init__.py", start = 12, end = 25 }]
+
+# --- model server ---
+
+[[case]]
+id = "server-singleton-lock"
+query = "where does a FileLock ensure only one model server is started across processes"
+expect = [{ file = "src/fcx/model_server.py", start = 88, end = 118 }]
+
+[[case]]
+id = "detached-spawn"
+query = "where is the model server launched as a detached background subprocess"
+expect = [{ file = "src/fcx/model_server.py", start = 55, end = 76 }]
+
+[[case]]
+id = "llm-retry"
+query = "where is a request retried by restarting the local model on a connection error"
+expect = [{ file = "src/fcx/llm.py", start = 64, end = 83 }]
+
+# --- accuracy features (also regression coverage for new code) ---
+
+[[case]]
+id = "citation-validation"
+query = "where is a citation checked against the real file for existence and in-bounds line range"
+expect = [{ file = "src/fcx/citations.py", start = 68, end = 85 }]
+
+[[case]]
+id = "merge-voting"
+query = "where are citations from multiple samples merged and vote counts computed"
+expect = [{ file = "src/fcx/citations.py", start = 129, end = 176 }]
+
+[[case]]
+id = "repair-loop"
+query = "where does the agent ask the model to fix invalid citations in one corrective turn"
+expect = [{ file = "src/fcx/agent.py", start = 70, end = 97 }]
+
+[[case]]
+id = "self-consistency"
+query = "where are multiple independent explorations run concurrently and their citations merged"
+expect = [{ file = "src/fcx/agent.py", start = 99, end = 136 }]
+
+[[case]]
+id = "output-contract"
+query = "where is the final_answer output format contract described to the model"
+expect = [{ file = "src/fcx/prompts/system.md.jinja", start = 19, end = 29 }]
+
+# --- multi-file traces (harder: the answer spans files) ---
+
+[[case]]
+id = "path-translate-and-sandbox"
+query = "how is a model-supplied /workspace path translated to the real filesystem and then confirmed inside the repo"
+expect = [
+  { file = "src/fcx/paths.py", start = 13, end = 24 },
+  { file = "src/fcx/tools/base.py", start = 18, end = 27 },
+]
+
+[[case]]
+id = "max-turns-behavior"
+query = "what happens when the exploration reaches its maximum turn budget"
+expect = [
+  { file = "src/fcx/agent.py", start = 47, end = 66 },
+  { file = "src/fcx/prompts/__init__.py", start = 42, end = 44 },
+]

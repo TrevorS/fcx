@@ -45,6 +45,7 @@ testpaths = ["tests"]
 "src/fcx/prompts/system.md.jinja" = "fcx/prompts/system.md.jinja"
 "src/fcx/prompts/query.md.jinja" = "fcx/prompts/query.md.jinja"
 "src/fcx/prompts/max_turns.md.jinja" = "fcx/prompts/max_turns.md.jinja"
+"src/fcx/prompts/repair.md.jinja" = "fcx/prompts/repair.md.jinja"
 
 [tool.ty.environment]
 python-version = "3.13"

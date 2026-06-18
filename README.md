@@ -43,7 +43,21 @@ fcx explore "where are the model's read-only tool calls executed concurrently" -
 
 The first run boots a resident local model server; later calls attach instantly. Paths are shown at the
 model's `/workspace` root. Other flags: `--json` (structured result), `--path <dir>` (explore another
-repo), plus `fcx status` and `fcx stop-model`.
+repo), `--samples N` (see below), plus `fcx status` and `fcx stop-model`.
+
+### Accuracy features
+
+- **Citation validation + repair** — every returned citation is checked against the real file; a
+  missing path or an out-of-bounds line range is flagged `invalid` (and shown in `--json`). By default
+  fcx spends one extra corrective turn asking the model to fix invalid citations. Disable with
+  `FCX_REPAIR_INVALID_CITATIONS=false`.
+- **Self-consistency** — `fcx explore "<query>" --samples 3` runs N independent explorations
+  concurrently and merges their citations, unioning overlapping ranges and reporting a `votes` count
+  per region. Higher recall on ambiguous queries; votes double as a confidence signal. (`FCX_SAMPLES`
+  sets the default.)
+
+Accuracy is measured, not assumed — see [`evals/`](evals/) (`make eval`) for the file-F1 / line-F1
+harness used to validate these.
 
 ## Configure
 

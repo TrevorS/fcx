@@ -11,7 +11,7 @@ import sys
 
 import typer
 
-from .agent import make_agent
+from .agent import explore_consistent, make_agent
 from .config import get_config
 from .llm import LLM
 from .model_server import ensure_model_up, model_status, stop_model
@@ -21,7 +21,13 @@ app = typer.Typer(add_completion=False, no_args_is_help=True, help="FastContext 
 
 
 async def _run_explore(
-    query: str, path: str | None, max_turns: int | None, json_out: bool, citation: bool, quiet: bool
+    query: str,
+    path: str | None,
+    max_turns: int | None,
+    samples: int | None,
+    json_out: bool,
+    citation: bool,
+    quiet: bool,
 ) -> None:
     cfg = get_config()
     resolve_rg(cfg.rg_path)  # fail loud if ripgrep is missing
@@ -36,7 +42,13 @@ async def _run_explore(
         if not quiet:
             print(f"turn {n}: {summary}", file=sys.stderr)
 
-    res = await agent.explore(query, max_turns=max_turns or cfg.max_turns, on_turn=on_turn)
+    res = await explore_consistent(
+        agent,
+        query,
+        max_turns=max_turns or cfg.max_turns,
+        samples=samples or cfg.samples,
+        on_turn=on_turn,
+    )
 
     if json_out:
         print(res.model_dump_json(indent=2))
@@ -47,8 +59,15 @@ async def _run_explore(
         if res.citations:
             print()
             for c in res.citations:
-                flag = "" if c.in_root else "  [outside workspace]"
-                print(f"{c.path}:{c.start}-{c.end}{flag}  {c.reason or ''}".rstrip())
+                flags = ""
+                if not c.in_root:
+                    flags += "  [outside workspace]"
+                if not c.valid:
+                    detail = f"file has {c.file_lines} lines" if c.file_lines is not None else "file not found"
+                    flags += f"  [invalid: {detail}]"
+                if c.votes > 1:
+                    flags += f"  [{c.votes} votes]"
+                print(f"{c.path}:{c.start}-{c.end}{flags}  {c.reason or ''}".rstrip())
         print(
             f"\n[{res.turns} turns, {res.usage.total} tokens, {res.usage.cached} cached prompt]",
             file=sys.stderr,
@@ -60,12 +79,15 @@ def explore(
     query: str = typer.Argument(..., help="natural-language exploration request"),
     path: str | None = typer.Option(None, "--path", "-p", help="repository root to explore (default: cwd)"),
     max_turns: int | None = typer.Option(None, "--max-turns", "-n", help="max exploration turns"),
+    samples: int | None = typer.Option(
+        None, "--samples", "-k", help="run N independent explorations and merge citations by agreement"
+    ),
     json_out: bool = typer.Option(False, "--json", help="emit the full structured result as JSON"),
     citation: bool = typer.Option(False, "--citation", "-c", help="print only the <final_answer> block"),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="suppress per-turn progress on stderr"),
 ) -> None:
     """Explore a repository and return file:line citations."""
-    asyncio.run(_run_explore(query, path, max_turns, json_out, citation, quiet))
+    asyncio.run(_run_explore(query, path, max_turns, samples, json_out, citation, quiet))
 
 
 @app.command()
