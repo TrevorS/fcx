@@ -13,6 +13,7 @@ dependencies = [
     "mlx-lm>=0.31.3",
     "openai>=2.43.0",
     "pydantic>=2.13.4",
+    "rich>=15.0.0",
     "pydantic-settings>=2.14.1",
     "python-dotenv>=1.2.2",
     "typer>=0.26.7",

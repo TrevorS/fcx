@@ -8,16 +8,59 @@ stays resident across invocations; only this CLI process is ephemeral.
 import asyncio
 import json
 import sys
+from pathlib import Path
 
 import typer
+from rich import box
+from rich.console import Console
+from rich.table import Table
+from rich.text import Text
 
 from .agent import explore_consistent, make_agent
+from .citations import ExploreResult
 from .config import get_config
 from .llm import LLM
 from .model_server import ensure_model_up, model_status, stop_model
 from .ripgrep import resolve_rg
 
 app = typer.Typer(add_completion=False, no_args_is_help=True, help="FastContext repository explorer")
+
+
+def _rel(path: str, root: Path) -> str:
+    """Show citations relative to the explored repo root; fall back to the absolute path."""
+    try:
+        return str(Path(path).resolve().relative_to(root.resolve()))
+    except ValueError:
+        return path
+
+
+def _print_result(res: ExploreResult, root: Path) -> None:
+    """Render the human-facing default view: one table of real-path citations, then a stats line.
+
+    The model speaks in /workspace paths (its training prior); we only ever show the remapped, real
+    filesystem paths here. Raw model output is available via --citation; structured data via --json.
+    """
+    console = Console()
+    if res.citations:
+        table = Table(box=box.SIMPLE_HEAD, expand=True, show_edge=False, pad_edge=False, header_style="bold")
+        table.add_column("Location", style="cyan", overflow="fold")
+        table.add_column("Why", overflow="fold")
+        for c in res.citations:
+            loc = Text(f"{_rel(c.path, root)}:{c.start}-{c.end}")
+            if not c.valid:
+                detail = f"{c.file_lines} lines" if c.file_lines is not None else "missing"
+                loc.append(f"  [invalid: {detail}]", style="red")
+            if not c.in_root:
+                loc.append("  [outside workspace]", style="yellow")
+            if c.votes > 1:
+                loc.append(f"  [votes: {c.votes}]", style="green")
+            table.add_row(loc, c.reason or "")
+        console.print(table)
+    else:
+        console.print(res.answer or "[dim]No citations found.[/dim]")
+    Console(stderr=True).print(
+        f"[dim]{res.turns} turns · {res.usage.total} tokens · {res.usage.cached} cached · {root}[/dim]"
+    )
 
 
 async def _run_explore(
@@ -55,23 +98,7 @@ async def _run_explore(
     elif citation:
         print(res.answer)
     else:
-        print(res.answer)
-        if res.citations:
-            print()
-            for c in res.citations:
-                flags = ""
-                if not c.in_root:
-                    flags += "  [outside workspace]"
-                if not c.valid:
-                    detail = f"file has {c.file_lines} lines" if c.file_lines is not None else "file not found"
-                    flags += f"  [invalid: {detail}]"
-                if c.votes > 1:
-                    flags += f"  [{c.votes} votes]"
-                print(f"{c.path}:{c.start}-{c.end}{flags}  {c.reason or ''}".rstrip())
-        print(
-            f"\n[{res.turns} turns, {res.usage.total} tokens, {res.usage.cached} cached prompt]",
-            file=sys.stderr,
-        )
+        _print_result(res, root)
 
 
 @app.command()
